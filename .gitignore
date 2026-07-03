@@ -1,0 +1,17 @@
+# System
+.DS_Store
+Thumbs.db
+
+# OpenClaw runtime
+.openclaw/
+.clawhub/
+openclaw-workspace-state.json
+
+# Sessions / memory (personal)
+memory/
+
+# Temp files
+temp/*.md
+
+# Node
+node_modules/

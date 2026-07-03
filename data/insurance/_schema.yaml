@@ -1,0 +1,668 @@
+# 保险产品数据结构规范 v2
+
+## 设计原则
+1. 每个产品对应一个目录，而非单文件（文件太多太大）
+2. 核心字段必须结构化（用于规则引擎筛选），说明文本保留原文（用于 LLM 解释）
+3. 区分"机器可筛选"和"人/LLM 可阅读"
+4. 支持产品版本迭代（旧版标记 deprecated，新版引用变更记录）
+
+## 目录结构
+
+```
+data/insurance/
+├── _schema.yaml                    # 本规范文件
+├── _index.yaml                     # 产品总索引
+│
+├── medical/                        # 医疗险
+│   ├── _overview.yaml              # 医疗险品类的通用知识
+│   └── 众安-个人医疗险-2025B款/
+│       ├── product.yaml            # 产品基本信息（主文件，所有机器可筛选字段）
+│       ├── coverage.yaml           # 保障责任详细（必选+可选，每项的保额/免赔/比例/限制）
+│       ├── premium.yaml            # 费率表（年龄×性别×社保×计划 矩阵）
+│       ├── underwriting.yaml       # 健康告知+核保规则+职业限制+特殊人群
+│       ├── services.yaml           # 增值服务+使用条件+医院列表
+│       ├── claims.yaml             # 理赔流程+所需材料+时效
+│       ├── exclusions.yaml         # 免责条款（结构化分类）
+│       ├── plans.yaml              # 计划书（不同方案组合）
+│       ├── faq.yaml                # 常见问题（从经纪人角度）
+│       ├── broker_notes.yaml       # 经纪人专属备注（优劣/适合人群/坑点/话术）
+│       ├── changelog.yaml          # 版本变更记录
+│       └── sources/                # 原始文件（PDF/截图等，可选存放）
+│           ├── 条款_2025B款.pdf
+│           ├── 费率表_2025.xlsx
+│           └── ...
+│
+├── critical/                       # 重疾险（同结构）
+├── life/                           # 寿险
+├── accident/                       # 意外险
+└── savings/                        # 增额寿/年金
+```
+
+## 各文件字段定义
+
+### product.yaml — 产品基本信息（机器可筛选）
+
+```yaml
+product_id: "medical-zhongan-2025B"
+name: "个人医疗保险（互联网2025版B款）"
+brand: "众安尊享e生"
+company: "众安在线财产保险股份有限公司"
+category: "医疗险"
+sub_category: "百万医疗险"
+status: "active"              # active | deprecated | pending_review
+effective_date: "2025-01-01"  # 条款生效日
+last_updated: "2026-07-03"
+
+# 投保规则（机器筛选用，全部结构化）
+enrollment:
+  min_age: 30                  # 天
+  max_age: 70                  # 周岁
+  max_age_unit: "years"        # days | years
+  max_renewal_age: 105
+  guarantee_renewal: false     # 是否保证续保
+  guarantee_years: null
+  waiting_period:
+    accident: 0                # 意外无等待期
+    disease: 30                # 天，待确认
+  cooling_off: 15              # 犹豫期天数
+  coverage_period: "1年"
+  
+  # 社保要求
+  social_insurance:
+    required: false            # 是否必须有社保才能投
+    with_social: "费率A"
+    without_social: "费率B（通常更高）"
+
+  # 职业限制
+  occupation:
+    excluded_categories: ["大车司机", "高空作业", "消防员", "防爆警察", "矿工"]
+    excluded_industry: []
+    has_occupation_list: true
+    occupation_list_ref: "sources/职业类别表.pdf"
+
+  # 地域限制
+  region:
+    sale_regions: ["全国（除港澳台）"]   # 销售区域
+    hospital_regions: ["中国大陆"]       # 就医区域
+    excluded_hospitals: []               # 除外医院列表
+
+  # 年龄相关特殊规则
+  age_rules:
+    - condition: "age >= 56"
+      requirement: "需体检"
+    - condition: "age >= 61"
+      requirement: "仅支持部分计划"
+```
+
+### coverage.yaml — 保障责任详情
+
+```yaml
+# 总览
+total_sum_insured: 6000000          # 总保额上限
+deductible_shared: true             # 各项责任是否共享免赔额
+deductible_type: "年度累计"         # 年度累计 | 单次 | 无
+
+responsibilities:
+  - id: "general_medical"
+    name: "一般医疗保险金"
+    type: "required"
+    sum_insured: 3000000
+    deductible: 10000               # null 表示无免赔
+    reimbursement_ratio: 1.0        # 1.0 = 100%
+    reimbursement_ratio_no_social: 0.6  # 有社保身份但未用社保的赔付比例
+    reimbursement_ratio_note: "社保后100%报销"
+    
+    coverage_items:
+      - name: "住院医疗费用"
+        detail: "床位费/陪床费/膳食费/护理费/ICU/诊疗费/检查检验/治疗费/药品费/手术费/重建手术/西式理疗/医疗器械/耐用设备/精神心理治疗/救护车/手术机器人"
+        limits: []
+      
+      - name: "特殊门诊医疗费用"
+        detail: "肾透析/恶性肿瘤门诊(化疗/放疗/免疫/内分泌/靶向)/器官移植后抗排异"
+        limits: []
+      
+      - name: "门诊手术医疗费用"
+        detail: "门诊手术相关费用"
+        limits: []
+      
+      - name: "住院前后门急诊"
+        detail: "住院前30天+出院后30天"
+        limits: []
+      
+      - name: "出院后特别关怀"
+        detail: "家庭护理/康复治疗/临终关怀"
+        limits:
+          - type: "天数"
+            value: 30
+            note: "每次出院后累计最多30天"
+        sub_limit: 100000           # 此项单独的赔付上限
+    
+    extension:                      # 满期延续
+      type: "住院延续"
+      days: 30
+    
+    # 特别说明
+    notes:
+      - "与特定疾病医疗保险金共享免赔额"
+      - "药品不包括滋补类中草药"
+
+  - id: "specific_disease"
+    name: "特定疾病医疗保险金"
+    type: "required"
+    sum_insured: 6000000
+    deductible: 0                   # 0免赔
+    reimbursement_ratio: 1.0
+    trigger: "初次确诊特定疾病（120种重疾等）"
+    coverage_items:
+      # ... 同一般医疗的5类，但针对特定疾病
+    extension:
+      type: "住院延续"
+      days: 30
+    special_note: "确诊日在住院期间的，本次住院费用均可覆盖"
+
+  - id: "external_drug_device"
+    name: "外购药品及外购医疗器械费用医疗保险金"
+    type: "required"
+    sum_insured: 1000000            # 待确认
+    deductible: 0
+    reimbursement_ratio: 1.0
+    conditions:
+      - "须医院专科医生处方"
+      - "单次处方≤30天量"
+      - "药品须NMPA批准，器械须NMPA注册"
+      - "须在约定清单内"
+    exclusions_detail:
+      - "假体/义肢/轮椅/康复设备"
+      - "营养补充类/免疫调节类/美容减肥类/滋补中草药"
+
+  - id: "specific_drug"
+    name: "特定药品费用医疗保险金"
+    type: "required"
+    sum_insured: 6000000            # 待确认
+    deductible: 0
+    reimbursement_ratio: 1.0
+    sub_items:
+      - name: "恶性肿瘤重度院外特药+基因检测"
+        conditions:
+          - "指定药店购买"
+          - "需处方审核"
+          - "基因检测须指定机构"
+        drug_list_ref: "sources/特药清单.pdf"
+      
+      - name: "罕见病特定药品"
+        conditions:
+          - "指定药店购买"
+          - "需处方审核"
+      
+      - name: "特定进口药品+特定医疗机构住院"
+        conditions:
+          - "指定医疗机构"
+          - "需处方审核"
+    extension:
+      type: "治疗延续"
+      days: 30
+
+  - id: "advanced_cancer"
+    name: "恶性肿瘤先进疗法医疗保险金"
+    type: "required"
+    sum_insured: 6000000            # 待确认
+    deductible: 0
+    reimbursement_ratio: 1.0
+    sub_items:
+      - name: "质子重离子治疗"
+        provider: "指定医疗机构（以保单载明为准）"
+      - name: "硼中子俘获治疗"
+        provider: "指定医疗机构"
+      - name: "光免疫疗法"
+        provider: "指定医疗机构"
+
+  # 可选责任
+  - id: "remote_transfer"
+    name: "特定疾病异地转诊公共交通及住宿费用"
+    type: "optional"
+    sum_insured: 20000              # 待确认
+    deductible: 0                   # 单次免赔待确认
+    reimbursement_ratio: 1.0
+    details:
+      transport: "飞机限经济舱/火车限软卧或一等座"
+      companion: "限1名亲属陪同"
+      accommodation: "标准间，最多180天/年"
+      daily_accommodation_limit: 500  # 待确认
+
+  - id: "hospital_allowance"
+    name: "特定疾病住院津贴"
+    type: "optional"
+    daily_amount: 100               # 待确认
+    max_days_per_stay: 30           # 待确认
+    max_days_total: 180
+    deductible_days: 3              # 每次免赔天数
+
+  - id: "outpatient"
+    name: "门急诊医疗保险金"
+    type: "optional"
+    sum_insured: 10000              # 待确认
+    details: "覆盖诊疗/急诊/检查/药品/理疗/中医/牙科(意外)/精神心理"
+
+  - id: "internet_pharmacy"
+    name: "互联网药品费用医疗保险金"
+    type: "optional"
+    sum_insured: 5000               # 待确认
+    details: "指定互联网医院问诊+指定互联网药店购药，单次≤30天量"
+```
+
+### premium.yaml — 费率表
+
+```yaml
+# 费率表（结构化矩阵）
+# 维度：年龄 × 性别 × 社保身份 × 计划版本
+# 医疗险费率通常按年龄段分档
+
+premium:
+  currency: "CNY"
+  period: "annual"              # annual | monthly
+  effective_date: "2025-01-01"
+  
+  # 费率因子
+  factors:
+    - age                          # 0-105
+    - gender                       # male | female
+    - social_insurance             # with | without
+    - plan                         # standard | premium | ...
+  
+  # 基础费率（有社保，标准计划，年缴）
+  # 医疗险通常按年龄段分档
+  base_rates:
+    - age_range: "0-4"
+      rate: 798
+    - age_range: "5-10"
+      rate: 272
+    - age_range: "11-15"
+      rate: 200                    # 待确认
+    - age_range: "16-20"
+      rate: 180                    # 待确认
+    - age_range: "21-25"
+      rate: 220                    # 待确认
+    - age_range: "26-30"
+      rate: 312
+    - age_range: "31-35"
+      rate: 400                    # 待确认
+    - age_range: "36-40"
+      rate: 502
+    - age_range: "41-45"
+      rate: 700                    # 待确认
+    - age_range: "46-50"
+      rate: 950
+    - age_range: "51-55"
+      rate: 1400                   # 待确认
+    - age_range: "56-60"
+      rate: 1860
+    - age_range: "61-65"
+      rate: 2580
+    - age_range: "66-70"
+      rate: 3500                   # 待确认
+  
+  # 无社保系数
+  no_social_multiplier: 2.0        # 待确认，通常无社保版贵很多
+  
+  # 可选责任的加费
+  option_rates:
+    outpatient: 500                # 加门急诊的年保费增量
+    hospital_allowance: 200        # 加住院津贴
+    remote_transfer: 50            # 加异地转诊
+    internet_pharmacy: 100         # 加互联网药品
+  
+  # 家庭折扣
+  family_discount:
+    - members: 2
+      discount: 0.95
+    - members: 3
+      discount: 0.90
+    - members: 4
+      discount: 0.85
+    - members: 5
+      discount: 0.80
+  
+  # 续保费率调整规则
+  renewal_policy: "自然费率，按被保险人续保时年龄重新计费"
+  renewal_rate_change: "可能调整，最高年涨30%（监管上限）"
+```
+
+### underwriting.yaml — 核保规则
+
+```yaml
+underwriting:
+  # 健康告知问卷（原文）
+  health_questionnaire:
+    method: "智能核保"
+    full_text_ref: "sources/健康告知_2025B款.pdf"
+    
+    # 关键健康告知项目（结构化，用于Agent追问引导）
+    key_questions:
+      - id: "major_disease_history"
+        question: "是否曾患恶性肿瘤、心梗、脑出血、冠心病、肾功能不全、肝硬化等严重疾病？"
+        impact: "拒保"
+      
+      - id: "nodule"
+        question: "是否有甲状腺结节/乳腺结节/肺结节？"
+        impact: "可能除外/可能标体（需看分级）"
+        detail: "肺结节符合约定条件可正常投保"
+      
+      - id: "hypertension"
+        question: "是否有高血压（收缩压≥160或舒张压≥100）？"
+        impact: "可能拒保/加费"
+      
+      - id: "diabetes"
+        question: "是否有糖尿病？"
+        impact: "通常拒保（百万医疗险），建议转防癌医疗险"
+      
+      - id: "hepatitis"
+        question: "是否有乙肝？"
+        impact: "可智能核保，有机会承保"
+      
+      - id: "recent_hospitalization"
+        question: "最近2年内是否住院/手术？"
+        impact: "需人工核保"
+      
+      - id: "recent_checkup_abnormal"
+        question: "最近1年内体检是否有异常？"
+        impact: "需告知具体项目"
+      
+      - id: "children_specific"
+        question: "（少儿）是否早产/低体重/发育迟缓？"
+        impact: "2岁以下可能延期"
+      
+      - id: "female_specific"
+        question: "（女性）是否怀孕/有妇科疾病？"
+        impact: "怀孕期间通常不能投保"
+  
+  # 核保复议
+  review_support: true
+  review_rules:
+    - "所有除外疾病可申请核保复议"
+    - "9大类70种常见病支持自动复议，最快1年转正常承保"
+  
+  # 职业核保
+  occupation_underwriting:
+    excluded: ["大车司机", "高空作业人员", "消防员", "防爆警察", "采矿工人", "特技演员"]
+    excluded_detail: "详见《众安特殊职业类别表》"
+    note: "职业变更须30日内通知，若变更后属拒保范围则终止保障"
+  
+  # 特殊人群
+  special_populations:
+    pregnant: "不能投保"
+    children_under_2: "早产/低体重需人工核保"
+    elderly_over_60: "部分计划限制"
+  
+  # 投保金额限制
+  sum_insured_limits:
+    - condition: "age < 40"
+      max_general: 3000000
+    - condition: "age >= 40"
+      max_general: 2000000         # 待确认
+```
+
+### services.yaml — 增值服务
+
+```yaml
+services:
+  direct_billing: true
+  preauth_required: true
+  preauth_items:
+    - "所有住院治疗"
+    - "化疗/放疗/靶向/免疫/内分泌/透析/全麻门诊手术"
+    - "耐用医疗设备购买/租赁"
+    - "单价8000元以上的治疗/检查"
+
+  service_list:
+    - name: "重疾绿通就医"
+      detail: "12项重疾绿通协助，含住院/手术安排"
+      coverage: "全国"
+      condition: "确诊特定疾病后使用"
+    
+    - name: "住院垫付/直付"
+      detail: "网络医院直付，非网络垫付后理赔"
+      coverage: "全国网络医疗机构"
+      speed: "最快4小时到账"
+    
+    - name: "家庭医生咨询"
+      detail: "7×24小时不限次"
+      speed: "最快60秒接诊"
+      channel: "APP/电话"
+    
+    - name: "住院护工"
+      detail: "每年5天24小时专业护工陪护"
+    
+    - name: "上门护理"
+      detail: "覆盖312城，含中医理疗"
+    
+    - name: "特药配送直付"
+      detail: "海内外特药配送"
+      drug_list_size: 341
+    
+    - name: "恶性肿瘤基因检测"
+      detail: "最高2万元赔付"
+      condition: "指定基因检测机构"
+    
+    - name: "核保复议"
+      detail: "除外疾病可申请复议，9大类70种常见病最快1年自动转正常承保"
+
+  # 医院网络
+  hospital_network:
+    type: "二级及以上公立医院普通部 + 指定私立医院"
+    private_hospitals_count: 102
+    rehabilitation_hospitals_count: 33
+    total_private_added: 81       # 2026版新增
+    proton_heavy_ion_hospitals: "全国不限（指定机构，以保单载明为准）"
+    direct_billing_hospitals_ref: "sources/直付医院列表.pdf"
+    excluded_hospitals: []         # 除外医院
+```
+
+### exclusions.yaml — 免责条款
+
+```yaml
+exclusions:
+  categories:
+    - name: "故意/违法"
+      items:
+        - "投保人故意杀害/伤害被保险人"
+        - "被保险人故意自杀/自伤（无民事行为能力人除外）"
+        - "故意犯罪/抗拒刑事强制措施/拘禁/入狱"
+        - "殴斗/醉酒/吸毒/违规使用麻醉精神药品"
+        - "未遵医嘱擅自用药"
+        - "酒驾/无证驾驶/无有效行驶证机动车"
+      impact: "全不赔"
+    
+    - name: "既往症与等待期"
+      items:
+        - "既往症及特别约定除外疾病"
+        - "等待期内确诊疾病"
+        - "未经科学/医学认可的试验性/研究性治疗"
+        - "基因疗法（除审核通过细胞免疫疗法）"
+        - "职业病/医疗事故"
+        - "非约定医院就诊"
+    
+    - name: "不合理治疗"
+      items:
+        - "未经医生建议自行治疗/自行购药"
+        - "虽持处方但非开方医生执业机构购买（外购药除外）"
+        - "非医疗机构治疗（临终关怀/基因检测除外）"
+        - "处方超过30天量"
+        - "特药适应症不符/已耐药"
+        - "代诊/挂床住院/不符合入院标准/拒不出院"
+    
+    - name: "特定治疗/状态"
+      items:
+        - "矮小症/早熟/肥胖症/胃减容术"
+        - "整形/美容/变性及并发症"
+        - "怀孕/流产/分娩/避孕/节育/不孕不育"
+        - "牙科（非意外）/屈光不正/康复器具"
+        - "包皮/包茎/性功能障碍"
+        - "除7种人工器官外的材料费"
+      note: "康复治疗费符合约定可赔"
+    
+    - name: "职业与运动"
+      items:
+        - "《众安特殊职业类别表》中的职业"
+        - "职业运动/可获得报酬的运动"
+        - "高风险运动（潜水/滑翔/跳伞/蹦极/攀岩/武打/赛车/探险等）"
+    
+    - name: "特定疾病"
+      items:
+        - "性病/精神行为障碍/遗传病/先天畸形"
+        - "HIV/AIDS（职业/输血/器官移植原因除外）"
+    
+    - name: "不可抗力"
+      items:
+        - "战争/军事行动/暴乱/武装叛乱"
+        - "核爆炸/核辐射/核污染/化学污染"
+    
+    - name: "外购药/特药专用免责"
+      items:
+        - "药品/器械未在中国获批"
+        - "药品/器械适应症不符"
+        - "港澳台或境外治疗"
+        - "特药未在指定药店购买"
+        - "未按处方审核流程操作"
+        - "基因检测与用药方案无关"
+
+  # 争议高发免责项（经纪人需特别提醒客户）
+  high_risk_exclusions:
+    - "既往症不赔 — 很多客户以为'现在不严重'就能赔"
+    - "等待期出险不赔 — 不是买了第二天就生效"
+    - "外购药未走处方审核流程 — 自己买的不赔"
+    - "职业变更未告知 — 可能导致保障终止"
+    - "非指定医院 — 私立/社区/康复医院需确认"
+```
+
+### broker_notes.yaml — 经纪人专属备注
+
+```yaml
+broker_notes:
+  product_positioning: "百万医疗险的保障全面型标杆，适合追求保障广度、能接受1年期续保不确定性的客户"
+  
+  strengths:
+    - "保障维度最全：住院+门诊手术+特药+外购药械+先进疗法+康复护理"
+    - "外购药械不限清单，是在DRG改革下的核心竞争力"
+    - "三种先进癌症疗法全覆盖（质子重离子/硼中子/光免疫）"
+    - "住院前后门急诊覆盖最广（前后各30天）"
+    - "特药种类行业最多（341种含7种CAR-T）"
+    - "核保复议机制友好，亚健康客户有回头机会"
+    - "家庭折扣力度大，3人9折/5人8折"
+    - "61-70岁高龄可投，市场少有"
+  
+  weaknesses:
+    - "最大短板：不保证续保，保险公司可随时停售"
+    - "理赔须预授权（住院/化疗等），紧急情况48小时内补报"
+    - "外购药必须走指定流程（处方审核+指定药店），不够灵活"
+    - "部分人工器官/材料费不覆盖"
+    - "职业要求严格，多类职业直接拒保"
+    - "1年期产品，长期费率不确定"
+  
+  ideal_customers:
+    - "追求保障全面而非续保确定性的年轻人"
+    - "61-70岁高龄人群（竞品多限60岁以下）"
+    - "有轻微健康异常但想正常投保的（核保复议友好）"
+    - "家庭批量投保（折扣大）"
+  
+  avoid_customers:
+    - "极度看重续保稳定性的（推蓝医保/金医保3号）"
+    - "职业在拒保范围内的"
+    - "已患严重既往症的"
+  
+  competitor_positioning:
+    vs_blue_medical: "蓝医保胜在20年保证续保+外购药械放开，众安胜在保障广度（康复/先进疗法）和特药数量"
+    vs_gold_medical3: "金医保3号性价比更高且20年保证续保，众安胜在保障全面性和高龄可投"
+    vs_hao_yibao: "好医保认知度高但保障不如众安全面"
+  
+  sales_tips:
+    - "客户怕续保不稳 → 强调运营11年未停售，累计数千万客户"
+    - "客户嫌贵 → 对比竞品其实同年龄段差不多，30岁只要312元/年"
+    - "客户有结节等异常 → 讲核保复议机制，不一定被除外一辈子"
+    - "家庭客户 → 算5人8折后的总价，性价比立竿见影"
+  
+  risk_warnings_to_client:
+    - "这是1年期产品，不保证续保。虽然运营11年没停售，但风险客观存在"
+    - "住院/化疗等必须先申请预授权，否则不赔"
+    - "外购药必须走指定药店和处方审核流程，自己买了不赔"
+    - "如果换了拒保职业的工作，保障会终止"
+```
+
+### plans.yaml — 计划书/方案组合
+
+```yaml
+plans:
+  - name: "基础版"
+    description: "必选责任5项"
+    responsibilities: ["general_medical", "specific_disease", "external_drug_device", "specific_drug", "advanced_cancer"]
+    
+  - name: "标准版"
+    description: "基础+门急诊+住院津贴"
+    responsibilities: ["general_medical", "specific_disease", "external_drug_device", "specific_drug", "advanced_cancer", "outpatient", "hospital_allowance"]
+  
+  - name: "全面版"
+    description: "全部9项责任"
+    responsibilities: ["general_medical", "specific_disease", "external_drug_device", "specific_drug", "advanced_cancer", "remote_transfer", "hospital_allowance", "outpatient", "internet_pharmacy"]
+
+# 健康告知的不同版本（如有）
+health_questionnaire_versions:
+  - version: "标准版"
+    description: "常规健康告知"
+    ref: "sources/健康告知_标准版.pdf"
+  - version: "宽松版"
+    description: "部分结节/轻度三高可投"
+    ref: null
+```
+
+### _index.yaml — 产品总索引
+
+```yaml
+# 产品总索引 — Agent 用它做初筛
+products:
+  - id: "medical-zhongan-2025B"
+    name: "众安个人医疗保险（互联网2025版B款）"
+    category: "医疗险"
+    sub_category: "百万医疗险"
+    company: "众安保险"
+    status: "active"
+    guarantee_renewal: false
+    min_age: 30
+    max_age: 70
+    key_tags: ["保障全面", "341种特药", "先进疗法", "核保复议", "家庭折扣"]
+    weak_tags: ["不保证续保", "需预授权", "职业限制多"]
+    monthly_premium_30: 26           # 30岁有社保月保费
+    source_pdf: "条款+费率待补充"
+
+  - id: "medical-pingan-yiwuyou"
+    name: "平安医无忧·0免赔百万医"
+    category: "医疗险"
+    sub_category: "百万医疗险"
+    company: "平安"
+    status: "data_pending"           # 数据待上传
+    guarantee_renewal: false
+    min_age: 0                       # 待确认
+    max_age: 65                      # 待确认
+    key_tags: ["0免赔", "平安品牌", "少儿友好", "家庭折扣"]
+    weak_tags: ["不保证续保", "外购药清单制"]
+    source_pdf: "待KK上传"
+
+  # ... 更多产品
+```
+
+## 数据维护流程
+
+### 新增产品
+1. KK 上传原始文件（条款/费率/健告/服务手册/医院列表等）
+2. 我（Agent）读取 → 提取结构化数据 → 生成所有 YAML 文件
+3. KK 审核关键字段（费率数字/免责/健康告知）
+4. 更新 _index.yaml
+5. 标记 status: "active"
+
+### 产品更新
+1. KK 通知"XX产品2026版有新条款"
+2. 原产品目录标记 status: "deprecated"，移入 archived/
+3. 新增版本目录，changelog.yaml 记录变更点
+4. skill 匹配时只推荐 status: "active" 的产品
+
+### 定期巡检（心跳任务）
+- 每季度提醒 KK：检查是否有产品下架/停售/费率变化
+- 自动搜索该产品的最新市场信息（multi-search-engine）→ 如有变动通知KK
