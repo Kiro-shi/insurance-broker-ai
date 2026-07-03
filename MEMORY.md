@@ -32,7 +32,18 @@
 - 周报 cron：每周一 9AM，6/24 首次手动跑成功，6/30 定时跑超时失败，待验证
 - 已知问题：256 个孤儿 transcript（~105MB）、Memory Search 索引需重建
 
+## 经验教训
+- 2026-07-04：说"不能读飞书表格"是错的——应该先 `openclaw skills search` 搜 ClawHub 有没有插件再下结论。feishu-sheet 插件装了就能用。同理适用于任何能力边界问题。
+
+## 当前系统状态（2026-07-04 更新）
+- 新增插件：feishu-sheet（飞书表格读写）
+- 新增 skill：insurance-broker（保险经纪人AI，含Q&A知识库）
+- 新增工具：cloudflared（Cloudflare Tunnel，用于公网访问）
+- 新增工具：openpyxl（Python Excel 读取）
+- 活跃项目：保险经纪人AI应用（GitHub: Kiro-shi/insurance-broker-ai）
+
 ## 已完成
 - 2026-06-16：飞书权限补全、GitHub CLI 安装登录、上下文管理部署、Task Management Protocol
 - 2026-06-24：SOUL.md + IDENTITY.md 去模板化
 - 2026-07-02：配置大扫除（删 canvas 插件、清理 openclaw.json 备份、合并冗余 memory 文件）
+- 2026-07-03：保险经纪人AI MVP 跑通（data schema + skill + 1款产品 + 模拟客户 + GitHub 备份 + WebChat 公网方案验证）
